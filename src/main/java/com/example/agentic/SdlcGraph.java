@@ -25,7 +25,7 @@ final class SdlcGraph {
                 .addNode("decompose", node_async(SdlcNodes::decompose))
                 .addNode("plan", node_async(SdlcNodes::plan))
                 .addNode("constitution_gate", node_async(SdlcNodes::constitutionGate))
-                .addNode("fanout_design", node_async(state -> Map.of("phase", "design_fanout")))
+                .addNode("fanout_design", node_async(SdlcNodes::fanoutDesign))
                 .addNode("impact_analysis", node_async(SdlcNodes::impact))
                 .addNode("risk_analysis", node_async(SdlcNodes::risk))
                 .addNode("test_strategy", node_async(SdlcNodes::testStrategy))

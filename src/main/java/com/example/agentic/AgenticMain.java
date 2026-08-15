@@ -2,23 +2,31 @@ package com.example.agentic;
 
 import com.example.shortener.UrlShortenerServer;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Scanner;
 
 /**
  * CLI:
- *   run greenfield|brownfield|ambiguous [--auto-approve] [--clarify memory]
+ *   run greenfield|brownfield|ambiguous [--auto-approve|--interactive] [--clarify memory]
  *   resume THREAD --approve|--reject|--request-changes|--clarify memory
  *   serve [port]
+ *
+ * HITL resume uses an in-memory checkpointer: --interactive keeps the same JVM.
+ * A second {@code mvn exec:java resume ...} process cannot see the first run's checkpoints.
  */
 public final class AgenticMain {
+
+    private static final Scanner STDIN = new Scanner(System.in);
 
     public static void main(String[] args) throws Exception {
         if (args.length == 0) {
             System.out.println("""
                     Usage:
                       java ... AgenticMain serve [port]
-                      java ... AgenticMain run <greenfield|brownfield|ambiguous> [--auto-approve] [--clarify memory]
+                      java ... AgenticMain run <greenfield|brownfield|ambiguous> [--auto-approve|--interactive] [--clarify memory]
                       java ... AgenticMain resume <threadId> --approve|--reject|--request-changes|--clarify memory
                     """);
             return;
@@ -34,9 +42,15 @@ public final class AgenticMain {
         if ("run".equals(cmd)) {
             String scenario = args[1];
             boolean auto = has(args, "--auto-approve");
+            boolean interactive = has(args, "--interactive");
             String storage = flagValue(args, "--clarify", "memory");
-            if (auto) {
+            if (auto || interactive) {
+                GraphLog.line("start scenario=" + scenario
+                        + " mode=" + (interactive ? "interactive-HITL" : "auto-approve"));
                 var result = runner.runUntilComplete(scenario, true, current -> {
+                    if (interactive) {
+                        return promptHuman(current);
+                    }
                     if (current.nextNode().contains("clarify")) {
                         return Map.of("clarificationStorage", storage);
                     }
@@ -62,6 +76,56 @@ public final class AgenticMain {
             }
             print(runner.resume(thread, updates));
         }
+    }
+
+    private static Map<String, Object> promptHuman(Runner.RunResult current) {
+        System.out.println();
+        System.out.println("======== HUMAN GATE ========");
+        System.out.println("thread_id=" + current.threadId());
+        System.out.println("next_node=" + current.nextNode());
+        System.out.println("phase=" + current.phase());
+        if (current.state() != null) {
+            System.out.println("runDir=" + current.state().runDir());
+        }
+        if (current.nextNode().contains("clarify")) {
+            System.out.println("Ambiguity: where should analytics be stored?");
+            System.out.print("Enter storage [memory|sqlite|postgres] (default memory): ");
+            String line = stdin().trim().toLowerCase(Locale.ROOT);
+            if (line.isEmpty()) {
+                line = "memory";
+            }
+            GraphLog.line("human clarification storage=" + line);
+            return Map.of("clarificationStorage", line);
+        }
+        if (current.state() != null) {
+            Path gate = Path.of(current.state().runDir(), "HITL_GATE.md");
+            try {
+                if (Files.exists(gate)) {
+                    System.out.println();
+                    System.out.println(Files.readString(gate));
+                }
+            } catch (Exception e) {
+                System.out.println("(could not read HITL_GATE.md: " + e.getMessage() + ")");
+            }
+        }
+        System.out.print("HITL action [approve|reject|request_changes] (default approve): ");
+        String action = stdin().trim().toLowerCase(Locale.ROOT).replace(' ', '_');
+        if (action.isEmpty()) {
+            action = "approve";
+        }
+        if (!action.equals("approve") && !action.equals("reject") && !action.equals("request_changes")) {
+            System.out.println("Unknown action '" + action + "', treating as reject (safe-stop).");
+            action = "reject";
+        }
+        GraphLog.line("human HITL action=" + action);
+        return Map.of("hitlAction", action);
+    }
+
+    private static String stdin() {
+        if (!STDIN.hasNextLine()) {
+            return "";
+        }
+        return STDIN.nextLine();
     }
 
     private static void print(Runner.RunResult result) {

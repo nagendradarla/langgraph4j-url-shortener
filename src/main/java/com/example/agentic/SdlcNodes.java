@@ -117,8 +117,16 @@ final class SdlcNodes {
             return Map.of("status", "blocked", "phase", "constitution_failed",
                     "error", "Spec FRs or tasks missing");
         }
+        GraphLog.line("constitution_gate passed — spec FRs and task DAG present");
         return Map.of("phase", "constitution_passed",
                 "decisions", List.of(Map.of("node", "constitution_gate", "passed", true)));
+    }
+
+    static Map<String, Object> fanoutDesign(OrchestratorState state) throws IOException {
+        audit(Path.of(state.runDir()), "fanout_design", "parallel: impact | risk | test_strategy");
+        GraphLog.line("FAN-OUT → impact_analysis | risk_analysis | test_strategy  (join at join_design)");
+        return Map.of("phase", "design_fanout",
+                "decisions", List.of(Map.of("node", "fanout_design")));
     }
 
     static Map<String, Object> impact(OrchestratorState state) throws IOException {
@@ -154,7 +162,9 @@ final class SdlcNodes {
         return Map.of("testStrategy", strategy, "decisions", List.of(Map.of("node", "test_strategy")));
     }
 
-    static Map<String, Object> joinDesign(OrchestratorState state) {
+    static Map<String, Object> joinDesign(OrchestratorState state) throws IOException {
+        audit(Path.of(state.runDir()), "join_design", "sync barrier — all design branches complete");
+        GraphLog.line("JOIN ← impact + risk + test_strategy  (sync barrier before implement)");
         return Map.of("phase", "design_complete", "decisions", List.of(Map.of("node", "join_design")));
     }
 
@@ -203,6 +213,10 @@ final class SdlcNodes {
             if (wave.isEmpty()) {
                 wave = List.of(ready.get(0));
             }
+            GraphLog.line("implement wave: " + wave.stream()
+                    .map(t -> t.get("id") + "(" + t.get("kind") + ")")
+                    .reduce((a, b) -> a + ", " + b).orElse("-")
+                    + (wave.size() > 1 ? "  [parallel tasks]" : ""));
             for (Map<String, Object> task : wave) {
                 applyTask(workspace, task, poison && "service".equals(task.get("kind")));
                 task.put("status", "done");
@@ -408,16 +422,19 @@ final class SdlcNodes {
     static String routeQuality(OrchestratorState state) {
         boolean tests = Boolean.TRUE.equals(state.testReport().get("passed"));
         boolean sast = Boolean.TRUE.equals(state.sastReport().get("clean"));
+        String next;
         if (tests && sast) {
-            return "documentation";
+            next = "documentation";
+        } else if (state.iteration() + 1 < state.maxIterations()) {
+            next = "retry";
+        } else if (!state.flag("fallbackUsed")) {
+            next = "fallback";
+        } else {
+            next = "rollback";
         }
-        if (state.iteration() + 1 < state.maxIterations()) {
-            return "retry";
-        }
-        if (!state.flag("fallbackUsed")) {
-            return "fallback";
-        }
-        return "rollback";
+        GraphLog.line("quality gate: tests=" + tests + " sast=" + sast
+                + " iteration=" + state.iteration() + " → " + next);
+        return next;
     }
 
     static String routeHitl(OrchestratorState state) {
@@ -437,6 +454,7 @@ final class SdlcNodes {
     }
 
     private static void audit(Path runDir, String node, String event) throws IOException {
+        GraphLog.line(node + " — " + event);
         WorkspaceIo.appendJsonl(runDir.resolve("audit.jsonl"),
                 "{\"node\":\"" + node + "\",\"event\":\"" + event + "\",\"ts\":\"" + Instant.now() + "\"}");
     }
