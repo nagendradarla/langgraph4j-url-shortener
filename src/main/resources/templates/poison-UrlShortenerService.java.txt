@@ -1,0 +1,8 @@
+package com.example.shortener;
+
+import java.util.Random;
+
+/** Intentionally unsafe first-iteration artifact for the SAST gate (CWE-338). */
+public class UrlShortenerService {
+    private final Random random = new Random();
+}

@@ -1,0 +1,12 @@
+target/
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+runs/
+*.db
+.idea/
+.classpath
+.project
+.settings/

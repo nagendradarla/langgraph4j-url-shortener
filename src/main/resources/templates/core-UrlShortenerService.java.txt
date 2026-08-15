@@ -1,0 +1,39 @@
+package com.example.shortener;
+
+import java.security.SecureRandom;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+
+/** Brownfield seed: shorten/resolve only. No click counts. */
+public class UrlShortenerService {
+    private static final Set<String> RESERVED = Set.of("shorten", "health", "ready");
+    private final ConcurrentHashMap<String, String> codeToUrl = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, String> urlToCode = new ConcurrentHashMap<>();
+    private final SecureRandom random = new SecureRandom();
+
+    public String shorten(String longUrl) {
+        if (!UrlValidator.isValid(longUrl)) {
+            throw new IllegalArgumentException("Invalid URL: " + longUrl);
+        }
+        String existing = urlToCode.get(longUrl);
+        if (existing != null) {
+            return existing;
+        }
+        String code;
+        do {
+            long n = random.nextLong() & Long.MAX_VALUE;
+            code = Base62Codec.encode(n % 1_000_000_000L);
+        } while (codeToUrl.containsKey(code) || RESERVED.contains(code));
+        codeToUrl.put(code, longUrl);
+        urlToCode.put(longUrl, code);
+        return code;
+    }
+
+    public Optional<String> resolve(String code) {
+        if (code == null || code.isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(codeToUrl.get(code));
+    }
+}

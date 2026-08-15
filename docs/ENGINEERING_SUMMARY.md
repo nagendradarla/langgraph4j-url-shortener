@@ -1,0 +1,10 @@
+# Final engineering summary
+
+Java 17 + LangGraph4j URL shortener with a gated SDLC orchestrator.
+
+- Product: shorten, redirect, click stats, health/ready, capacity 503
+- Orchestrator: StateGraph with parallel design branch, HITL interrupts, retry/fallback/rollback, audit, metrics
+- Scenarios: greenfield, brownfield, ambiguous
+- Setup: SETUP.md
+
+Limitations: in-memory storage; in-repo SAST stand-in; in-memory checkpointer (same JVM resume).
