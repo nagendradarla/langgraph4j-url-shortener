@@ -38,6 +38,7 @@ final class SdlcGraph {
                 .addNode("rollback", node_async(SdlcNodes::rollback))
                 .addNode("documentation", node_async(SdlcNodes::documentation))
                 .addNode("hitl", node_async(SdlcNodes::hitl))
+                .addNode("publish", node_async(SdlcNodes::publish))
                 .addNode("replan", node_async(SdlcNodes::replan))
                 .addNode("summarize", node_async(SdlcNodes::summarize))
                 .addNode("safe_stop", node_async(SdlcNodes::safeStop))
@@ -69,9 +70,10 @@ final class SdlcGraph {
                 .addEdge("rollback", "safe_stop")
                 .addEdge("documentation", "hitl")
                 .addConditionalEdges("hitl", edge_async(SdlcNodes::routeHitl), Map.of(
-                        "summarize", "summarize",
+                        "publish", "publish",
                         "replan", "replan",
                         "safe_stop", "safe_stop"))
+                .addEdge("publish", "summarize")
                 .addEdge("replan", "decompose")
                 .addEdge("summarize", END)
                 .addEdge("safe_stop", END);

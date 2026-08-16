@@ -44,6 +44,7 @@ public final class Runner {
         input.put("runDir", runDir.toString());
         input.put("injectSastFailure", request.injectSastFailure());
         input.put("applyOnApprove", request.applyOnApprove());
+        input.put("publishOnApprove", request.publishOnApprove());
         input.put("maxIterations", 5);
         RunnableConfig config = RunnableConfig.builder().threadId(threadId).build();
         Optional<OrchestratorState> state = invoke(GraphInput.args(input), config);
@@ -66,7 +67,12 @@ public final class Runner {
         return current;
     }
 
-    public record RunRequest(String scenario, String requirement, boolean injectSastFailure, boolean applyOnApprove) { }
+    public record RunRequest(String scenario, String requirement, boolean injectSastFailure,
+                             boolean applyOnApprove, boolean publishOnApprove) {
+        public RunRequest(String scenario, String requirement, boolean injectSastFailure, boolean applyOnApprove) {
+            this(scenario, requirement, injectSastFailure, applyOnApprove, false);
+        }
+    }
 
     public RunResult resume(String threadId, Map<String, Object> updates) {
         RunnableConfig config = RunnableConfig.builder().threadId(threadId).build();

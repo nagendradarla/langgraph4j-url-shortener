@@ -35,8 +35,9 @@ Same graph and HITL. Requirement is free text or a file. Needs `CURSOR_API_KEY` 
 ./scripts/sdlc.sh -f requirements/feature-bulk-shorten.txt
 ./scripts/sdlc.sh requirements/feature-optional-ttl.txt
 
-# After HITL approve, copy workspace Java into src/main/java (never git-commits):
-./scripts/sdlc.sh --apply -f requirements/feature-optional-ttl.txt
+# After HITL approve, commit product files and open a review PR (default; never merges):
+./scripts/sdlc.sh -f requirements/feature-optional-ttl.txt
+./scripts/sdlc.sh --no-pr --apply -f requirements/feature-optional-ttl.txt
 ```
 
 Default is `--interactive`. Pass `--auto-approve` only for unattended runs.

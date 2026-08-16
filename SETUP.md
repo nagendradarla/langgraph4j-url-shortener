@@ -64,11 +64,13 @@ cp .env.example .env
 ./scripts/sdlc.sh -f requirements/feature-bulk-shorten.txt
 ./scripts/sdlc.sh requirements/feature-optional-ttl.txt
 
-# After HITL approve, copy workspace Java into src/main/java (agent never git commits):
-./scripts/sdlc.sh --apply -f requirements/feature-bulk-shorten.txt
+# After HITL approve, apply product files, commit, and open a review PR (default):
+./scripts/sdlc.sh -f requirements/feature-bulk-shorten.txt
+# Copy files but do not git-commit:
+./scripts/sdlc.sh --no-pr --apply -f requirements/feature-bulk-shorten.txt
 ```
 
-`--apply` copies `runs/<thread>/workspace/com/example/shortener/*.java` into `src/main/java` only when you approve. Omit it to review the workspace first. Default is `--interactive`; pass `--auto-approve` only for unattended demos.
+`--pr` (default) copies workspace Java into `src/`, commits only `com.example.shortener` files, and opens a PR. The graph never merges. `--no-pr` skips git. Default HITL is `--interactive`; pass `--auto-approve` only for unattended demos.
 
 Manual HITL (no `--auto-approve`):
 
@@ -85,6 +87,7 @@ Each run writes `runs/<threadId>/`:
 |------|---------|
 | `workspace/` | Generated Java for that spec |
 | `HITL_GATE.md` | Review package |
+| `PR.md` | Branch and PR URL after HITL approve |
 | `ENGINEERING_SUMMARY.md` | Plan, metrics, limitations |
 | `audit.jsonl` | Decision lineage |
 | `metrics.json` | retries, rollbacks, e2e ms |
@@ -160,6 +163,7 @@ See `constitution.md`:
 | SAST flags `new Random()` | Expected on greenfield iteration 0; retry should apply `SecureRandom` |
 | HITL never pauses | You passed `--auto-approve`; run without it |
 | `CURSOR_API_KEY is required` | Put the key in `.env` (see `.env.example`); canned scenarios need no key |
+| `spawn /bin/zsh ENOENT` | Cursor Shell crashed the sidecar; worker now disallows shell. Re-run `./scripts/sdlc.sh` |
 | Ambiguous never asks | Clarification already in state; start a new thread |
 | Tests look at `src/main/java` | Run Maven from the repo root |
 
