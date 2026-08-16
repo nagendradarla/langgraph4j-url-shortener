@@ -44,7 +44,18 @@ final class WorkspaceIo {
                 java.nio.file.StandardOpenOption.APPEND);
     }
 
-    private static void copyTree(Path src, Path dest) throws IOException {
+    static void copyTree(Path src, Path dest) throws IOException {
+        if (!Files.exists(src)) {
+            return;
+        }
+        if (Files.isRegularFile(src)) {
+            Path parent = dest.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            Files.copy(src, dest, StandardCopyOption.REPLACE_EXISTING);
+            return;
+        }
         try (Stream<Path> walk = Files.walk(src)) {
             walk.forEach(path -> {
                 try {
@@ -62,7 +73,7 @@ final class WorkspaceIo {
         }
     }
 
-    private static void deleteTree(Path root) throws IOException {
+    static void deleteTree(Path root) throws IOException {
         if (!Files.exists(root)) {
             return;
         }

@@ -29,6 +29,14 @@ public class OrchestratorState extends AgentState {
         return str("scenario", "greenfield");
     }
 
+    public boolean live() {
+        return "live".equals(scenario());
+    }
+
+    public String requirement() {
+        return str("requirement", "");
+    }
+
     public String runDir() {
         return str("runDir", "runs");
     }

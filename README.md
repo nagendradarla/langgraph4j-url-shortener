@@ -10,6 +10,9 @@ Java URL shortener with a LangGraph4j SDLC orchestrator: spec → task DAG → p
 cd ~/github/langgraph4j-url-shortener
 mvn test
 mvn -q exec:java -Dexec.args="run greenfield --auto-approve"
+# live feature/bugfix (needs CURSOR_API_KEY in .env):
+./scripts/sdlc.sh -r "Add GET /metrics for links and capacity"
+./scripts/sdlc.sh -f requirements/feature-bulk-shorten.txt
 mvn -q exec:java -Dexec.args="serve 8080"
 ```
 

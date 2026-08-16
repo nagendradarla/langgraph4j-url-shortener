@@ -9,7 +9,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 
-/** POST /shorten, GET /stats/{code}, GET /{code}, GET /health, GET /ready. */
+/** POST /shorten, POST /shorten/bulk, GET /stats/{code}, GET /{code}, GET /health, GET /ready. */
 public class UrlShortenerServer {
 
     private final UrlShortenerService service;
@@ -30,6 +30,7 @@ public class UrlShortenerServer {
 
     public HttpServer start(int port) throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
+        server.createContext("/shorten/bulk", this::handleBulkShorten);
         server.createContext("/shorten", this::handleShorten);
         server.createContext("/stats", this::handleStats);
         server.createContext("/health", this::handleHealth);
@@ -46,6 +47,22 @@ public class UrlShortenerServer {
     private void handleReady(HttpExchange exchange) throws IOException {
         boolean ready = "ok".equals(service.health().get("status"));
         respond(exchange, ready ? 200 : 503, ready ? "ready" : "not ready");
+    }
+
+    private void handleBulkShorten(HttpExchange exchange) throws IOException {
+        if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+            respond(exchange, 405, "Method Not Allowed");
+            return;
+        }
+        String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+        try {
+            String response = String.join("\n", service.bulkShorten(body));
+            respond(exchange, 200, response);
+        } catch (IllegalArgumentException e) {
+            respond(exchange, 400, "Invalid URL");
+        } catch (IllegalStateException e) {
+            respond(exchange, 503, "Capacity exceeded");
+        }
     }
 
     private void handleShorten(HttpExchange exchange) throws IOException {
@@ -102,11 +119,18 @@ public class UrlShortenerServer {
     }
 
     private void respond(HttpExchange exchange, int status, String body) throws IOException {
+        // Drain the request so HTTP keep-alive (browsers) does not hang.
+        try (var ignored = exchange.getRequestBody()) {
+            ignored.readAllBytes();
+        }
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=utf-8");
+        // Without Content-Type, browsers often sniff the body, fail, and show a blank tab.
         exchange.sendResponseHeaders(status, bytes.length);
         try (OutputStream os = exchange.getResponseBody()) {
             os.write(bytes);
         }
+        exchange.close();
     }
 
     private static final class SetReserved {

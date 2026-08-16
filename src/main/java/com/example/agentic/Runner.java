@@ -31,35 +31,47 @@ public final class Runner {
     }
 
     public RunResult start(String scenario, boolean injectSastFailure) {
+        return start(new RunRequest(scenario, Catalog.requirement(scenario), injectSastFailure, false));
+    }
+
+    public RunResult start(RunRequest request) {
         String threadId = UUID.randomUUID().toString();
         Path runDir = runsRoot.resolve(threadId);
         Map<String, Object> input = new HashMap<>();
-        input.put("scenario", scenario);
-        input.put("requirement", Catalog.requirement(scenario));
+        input.put("scenario", request.scenario());
+        input.put("requirement", request.requirement());
         input.put("threadId", threadId);
         input.put("runDir", runDir.toString());
-        input.put("injectSastFailure", injectSastFailure);
+        input.put("injectSastFailure", request.injectSastFailure());
+        input.put("applyOnApprove", request.applyOnApprove());
         input.put("maxIterations", 5);
         RunnableConfig config = RunnableConfig.builder().threadId(threadId).build();
         Optional<OrchestratorState> state = invoke(GraphInput.args(input), config);
         return packageResult(threadId, config, state);
     }
 
-    public RunResult resume(String threadId, Map<String, Object> updates) {
-        RunnableConfig config = RunnableConfig.builder().threadId(threadId).build();
-        Optional<OrchestratorState> state = invoke(GraphInput.resume(updates), config);
-        return packageResult(threadId, config, state);
-    }
-
     public RunResult runUntilComplete(String scenario, boolean injectSastFailure,
                                       Function<RunResult, Map<String, Object>> onInterrupt) {
-        RunResult current = start(scenario, injectSastFailure);
+        return runUntilComplete(new RunRequest(scenario, Catalog.requirement(scenario), injectSastFailure, false),
+                onInterrupt);
+    }
+
+    public RunResult runUntilComplete(RunRequest request, Function<RunResult, Map<String, Object>> onInterrupt) {
+        RunResult current = start(request);
         int hops = 0;
         while (current.interrupted() && hops++ < 8) {
             Map<String, Object> decision = onInterrupt.apply(current);
             current = resume(current.threadId(), decision);
         }
         return current;
+    }
+
+    public record RunRequest(String scenario, String requirement, boolean injectSastFailure, boolean applyOnApprove) { }
+
+    public RunResult resume(String threadId, Map<String, Object> updates) {
+        RunnableConfig config = RunnableConfig.builder().threadId(threadId).build();
+        Optional<OrchestratorState> state = invoke(GraphInput.resume(updates), config);
+        return packageResult(threadId, config, state);
     }
 
     private Optional<OrchestratorState> invoke(GraphInput input, RunnableConfig config) {
