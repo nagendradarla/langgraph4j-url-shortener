@@ -72,7 +72,7 @@ public class UrlShortenerServer {
         }
         String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         try {
-            respond(exchange, 200, service.shorten(body.trim()));
+            respond(exchange, 200, service.shorten(body));
         } catch (IllegalArgumentException e) {
             respond(exchange, 400, "Invalid URL");
         } catch (IllegalStateException e) {

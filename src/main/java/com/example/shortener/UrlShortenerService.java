@@ -7,6 +7,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -19,6 +20,7 @@ public class UrlShortenerService {
     private final ConcurrentHashMap<String, String> codeToUrl = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, String> urlToCode = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, AtomicLong> clickCounts = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Long> codeToExpiryEpochMillis = new ConcurrentHashMap<>();
     private final SecureRandom random = new SecureRandom();
     private final int maxEntries;
 
@@ -30,7 +32,12 @@ public class UrlShortenerService {
         this.maxEntries = maxEntries;
     }
 
-    public String shorten(String longUrl) {
+    public String shorten(String body) {
+        ShortenBodyParser.ParsedRequest request = ShortenBodyParser.parse(body);
+        return shortenUrl(request.url(), request.ttlSeconds());
+    }
+
+    private String shortenUrl(String longUrl, OptionalLong ttlSeconds) {
         if (!UrlValidator.isValid(longUrl)) {
             throw new IllegalArgumentException("Invalid URL: " + longUrl);
         }
@@ -42,6 +49,9 @@ public class UrlShortenerService {
         codeToUrl.put(code, longUrl);
         urlToCode.put(longUrl, code);
         clickCounts.put(code, new AtomicLong(0));
+        if (ttlSeconds.isPresent()) {
+            codeToExpiryEpochMillis.put(code, System.currentTimeMillis() + ttlSeconds.getAsLong() * 1000L);
+        }
         return code;
     }
 
@@ -124,10 +134,10 @@ public class UrlShortenerService {
         if (code == null || code.isBlank()) {
             return Optional.empty();
         }
-        String destination = codeToUrl.get(code);
-        if (destination == null) {
+        if (!codeToUrl.containsKey(code) || isExpired(code)) {
             return Optional.empty();
         }
+        String destination = codeToUrl.get(code);
         AtomicLong count = clickCounts.get(code);
         if (count != null) {
             count.incrementAndGet();
@@ -139,8 +149,15 @@ public class UrlShortenerService {
         if (code == null || code.isBlank()) {
             return Optional.empty();
         }
-        AtomicLong count = clickCounts.get(code);
-        return count == null ? Optional.empty() : Optional.of(count.get());
+        if (!clickCounts.containsKey(code) || isExpired(code)) {
+            return Optional.empty();
+        }
+        return Optional.of(clickCounts.get(code).get());
+    }
+
+    private boolean isExpired(String code) {
+        Long expiresAt = codeToExpiryEpochMillis.get(code);
+        return expiresAt != null && System.currentTimeMillis() >= expiresAt;
     }
 
     public Map<String, Object> health() {
