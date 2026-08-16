@@ -103,7 +103,7 @@ public class UrlShortenerService {
             if (part.endsWith("\r")) {
                 part = part.substring(0, part.length() - 1);
             }
-            lines.add(part);
+            lines.add(part.trim());
         }
         return lines;
     }
