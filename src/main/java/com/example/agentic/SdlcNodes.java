@@ -41,6 +41,7 @@ final class SdlcNodes {
         out.put("phase", "requirements");
         out.put("injectSastFailure", inject);
         out.put("applyOnApprove", state.flag("applyOnApprove"));
+        out.put("publishOnApprove", state.flag("publishOnApprove"));
         out.put("metrics", metrics);
         out.put("decisions", List.of(Map.of("node", "ingest", "at", Instant.now().toString())));
         return out;
@@ -423,7 +424,8 @@ final class SdlcNodes {
                 **SAST clean:** %s
                 **Iteration:** %s
 
-                Choose: Approve / Request changes / Reject. The graph will not self-merge.
+                Choose: Approve / Request changes / Reject.
+                Approve may copy workspace Java into src/ and open a review PR. The graph will not merge.
                 """.formatted(state.scenario(),
                 state.testReport().get("passed"),
                 state.sastReport().get("clean"),
@@ -471,9 +473,6 @@ final class SdlcNodes {
                 metrics.get("fallbacks"), metrics.get("e2eMs"));
         WorkspaceIo.write(Path.of(state.runDir(), "ENGINEERING_SUMMARY.md"), md);
         WorkspaceIo.write(Path.of(state.runDir(), "metrics.json"), metrics.toString());
-        if (state.flag("applyOnApprove") && "approve".equals(state.hitl().get("action"))) {
-            applyWorkspaceToProduct(state);
-        }
         audit(Path.of(state.runDir()), "summarize", "complete");
         return Map.of("summary", Map.of("metrics", metrics, "hitl", state.hitl()),
                 "metrics", metrics, "status", "completed", "phase", "done",
@@ -519,32 +518,98 @@ final class SdlcNodes {
     static String routeHitl(OrchestratorState state) {
         String action = String.valueOf(state.hitl().getOrDefault("action", "reject"));
         return switch (action) {
-            case "approve" -> "summarize";
+            case "approve" -> "publish";
             case "request_changes" -> "replan";
             default -> "safe_stop";
         };
     }
 
-    private static void applyWorkspaceToProduct(OrchestratorState state) throws IOException {
+    static Map<String, Object> publish(OrchestratorState state) throws IOException, InterruptedException {
+        Map<String, Object> info = new LinkedHashMap<>();
+        info.put("applied", false);
+        info.put("committed", false);
+        info.put("prUrl", "");
+        boolean apply = state.flag("applyOnApprove") || state.flag("publishOnApprove");
+        List<Path> applied = List.of();
+        if (apply) {
+            applied = applyWorkspaceToProduct(state);
+            info.put("applied", !applied.isEmpty());
+            info.put("files", applied.stream().map(Path::toString).toList());
+        }
+        if (!state.flag("publishOnApprove")) {
+            audit(Path.of(state.runDir()), "publish", apply ? "apply-only" : "skipped");
+            return Map.of("publish", info, "phase", "publish",
+                    "decisions", List.of(Map.of("node", "publish", "mode", apply ? "apply" : "skip")));
+        }
+        String title = String.valueOf(state.spec().getOrDefault("title", "SDLC change"));
+        String thread = state.str("threadId", "run");
+        String branch = GitPublisher.branchName(thread, title);
+        String body = """
+                ## Summary
+                HITL approved live run `%s` (%s).
+
+                ## Test plan
+                - Workspace SAST and overlay JUnit passed before HITL
+                - Review `runs/%s/HITL_GATE.md`
+
+                The graph does not merge this PR.
+                """.formatted(thread, title, thread);
+        GitPublisher.Result result = GitPublisher.publish(Path.of(".").toAbsolutePath().normalize(),
+                applied, branch, title, body);
+        info.put("committed", result.committed());
+        info.put("pushed", result.pushed());
+        info.put("openedPr", result.openedPr());
+        info.put("branch", result.branch());
+        info.put("prUrl", result.prUrl());
+        info.put("detail", result.detail());
+        WorkspaceIo.write(Path.of(state.runDir(), "PR.md"),
+                "# Pull request\n\n- branch: " + result.branch()
+                        + "\n- url: " + (result.prUrl().isBlank() ? "(none)" : result.prUrl())
+                        + "\n- " + result.detail() + "\n");
+        GraphLog.line("publish — " + result.detail());
+        audit(Path.of(state.runDir()), "publish",
+                (result.openedPr() ? result.prUrl() : result.detail()).replace("\"", "'"));
+        return Map.of("publish", info, "phase", "publish",
+                "decisions", List.of(Map.of("node", "publish", "pr", result.prUrl())));
+    }
+
+    private static List<Path> applyWorkspaceToProduct(OrchestratorState state) throws IOException {
+        List<Path> applied = new ArrayList<>();
         Path overlay = Path.of(state.workspace(), "com/example/shortener");
         Path dest = Path.of("src/main/java/com/example/shortener");
-        if (!Files.isDirectory(overlay)) {
+        if (Files.isDirectory(overlay)) {
+            Files.createDirectories(dest);
+            try (var files = Files.list(overlay)) {
+                files.filter(p -> p.toString().endsWith(".java")).forEach(p -> {
+                    try {
+                        Path target = dest.resolve(p.getFileName());
+                        Files.copy(p, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                        applied.add(Path.of("src/main/java/com/example/shortener").resolve(p.getFileName()));
+                        GraphLog.line("apply " + p.getFileName() + " → src/main/java/com/example/shortener/");
+                    } catch (IOException e) {
+                        throw new IllegalStateException(e);
+                    }
+                });
+            }
+        }
+        Path extraTests = Path.of(state.workspace(), "src/test/java");
+        Path testDest = Path.of("src/test/java");
+        if (Files.isDirectory(extraTests)) {
+            WorkspaceIo.copyTree(extraTests, testDest);
+            try (var walk = Files.walk(extraTests)) {
+                walk.filter(p -> p.toString().endsWith(".java")).forEach(p -> {
+                    Path rel = extraTests.relativize(p);
+                    applied.add(Path.of("src/test/java").resolve(rel));
+                    GraphLog.line("apply test " + rel + " → src/test/java/");
+                });
+            }
+        }
+        if (applied.isEmpty()) {
             GraphLog.line("apply skipped — no workspace Java");
-            return;
+        } else {
+            audit(Path.of(state.runDir()), "apply", dest.toString());
         }
-        Files.createDirectories(dest);
-        try (var files = Files.list(overlay)) {
-            files.filter(p -> p.toString().endsWith(".java")).forEach(p -> {
-                try {
-                    Files.copy(p, dest.resolve(p.getFileName()),
-                            java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                    GraphLog.line("apply " + p.getFileName() + " → src/main/java/com/example/shortener/");
-                } catch (IOException e) {
-                    throw new IllegalStateException(e);
-                }
-            });
-        }
-        audit(Path.of(state.runDir()), "apply", dest.toString());
+        return applied;
     }
 
     private static void copyProductFile(Path workspace, String name) throws IOException {

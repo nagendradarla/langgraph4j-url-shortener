@@ -21,14 +21,15 @@ flowchart TD
   validate -->|exhausted| fallback --> validate
   validate -->|still fail| rollback --> stop
   validate -->|pass| docs --> hitl[HITL interruptBefore]
-  hitl -->|approve| summary
+  hitl -->|approve| publish[apply + commit + PR]
+  publish --> summary
   hitl -->|request_changes| replan --> decompose
   hitl -->|reject| stop
 ```
 
 **Validate:** canned runs FR checks on the product classpath plus workspace SAST. Live runs SAST on the workspace and overlays generated Java onto a temp copy of the module, then `mvn -Dtest=com.example.shortener.* test`.
 
-**HITL approve + `--apply`:** copies `runs/<thread>/workspace/com/example/shortener/*.java` into `src/main/java`. The graph never git-commits.
+**HITL approve + `--pr` (live default):** copies workspace Java into `src/`, commits only `com.example.shortener` product/test files, pushes a `sdlc/<id>-…` branch, and opens a review PR. The graph never merges. `--no-pr` skips git; `--apply` copies files without a PR.
 
 Checkpoints: `MemorySaver` + `threadId`. Resume: `GraphInput.resume(updates)` in the same JVM (`--interactive`).
 

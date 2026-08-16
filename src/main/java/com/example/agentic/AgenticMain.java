@@ -10,7 +10,7 @@ import java.util.Scanner;
 
 /**
  * CLI:
- *   run live --requirement ... | --requirement-file <path> [--auto-approve|--interactive] [--apply]
+ *   run live --requirement ... | --requirement-file <path> [--auto-approve|--interactive] [--apply] [--pr]
  *   run greenfield|brownfield|ambiguous [--auto-approve|--interactive] [--clarify memory]
  *   resume THREAD --approve|--reject|--request-changes|--clarify memory
  *   serve [port]
@@ -26,7 +26,7 @@ public final class AgenticMain {
             System.out.println("""
                     Usage:
                       java ... AgenticMain serve [port]
-                      java ... AgenticMain run live --requirement <text> | --requirement-file <path> [--auto-approve|--interactive] [--apply]
+                      java ... AgenticMain run live --requirement <text> | --requirement-file <path> [--auto-approve|--interactive] [--apply] [--pr]
                       java ... AgenticMain run <greenfield|brownfield|ambiguous> [--auto-approve|--interactive] [--clarify memory]
                       java ... AgenticMain resume <threadId> --approve|--reject|--request-changes|--clarify memory
                     """);
@@ -44,7 +44,8 @@ public final class AgenticMain {
             String scenario = args[1];
             boolean auto = has(args, "--auto-approve");
             boolean interactive = has(args, "--interactive");
-            boolean apply = has(args, "--apply");
+            boolean apply = has(args, "--apply") || has(args, "--pr");
+            boolean publish = has(args, "--pr");
             String storage = flagValue(args, "--clarify", "memory");
             String requirement = "live".equals(scenario)
                     ? liveRequirement(args)
@@ -54,11 +55,12 @@ public final class AgenticMain {
                 return;
             }
             boolean injectSast = "greenfield".equals(scenario);
-            Runner.RunRequest request = new Runner.RunRequest(scenario, requirement, injectSast, apply);
+            Runner.RunRequest request = new Runner.RunRequest(scenario, requirement, injectSast, apply, publish);
             if (auto || interactive) {
                 GraphLog.line("start scenario=" + scenario
                         + " mode=" + (interactive ? "interactive-HITL" : "auto-approve")
-                        + (apply ? " apply" : ""));
+                        + (apply ? " apply" : "")
+                        + (publish ? " pr" : ""));
                 var result = runner.runUntilComplete(request, current -> {
                     if (interactive) {
                         return promptHuman(current);
@@ -157,6 +159,7 @@ public final class AgenticMain {
         if (result.state() != null) {
             System.out.println("runDir=" + result.state().runDir());
             System.out.println("hitl=" + result.state().hitl());
+            System.out.println("publish=" + result.state().value("publish").orElse(Map.of()));
             System.out.println("metrics=" + result.state().metrics());
         }
     }

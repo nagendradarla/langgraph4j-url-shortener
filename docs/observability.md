@@ -54,8 +54,8 @@ After ingest prints `runDir` (today: `ls -t runs | head -1`):
 | Terminal | Command | Shows |
 |----------|---------|-------|
 | A — orchestrator | `./scripts/sdlc.sh -f requirements/feature-bulk-shorten.txt` | `[sdlc]` nodes + HITL prompts |
-| B — lineage | `tail -f runs/<threadId>/audit.jsonl` | node + event + timestamp |
-| B — latest run | `ls -t runs \| head -1` | `threadId` when start log is missing |
+| B — dashboard | `./scripts/watch-sdlc.sh` | latest node, audit, workspace files |
+| B — lineage | `./scripts/watch-sdlc.sh -f` | `tail -f` of `audit.jsonl` |
 | B — review pack | `ls runs/<id>/artifacts runs/<id>/workspace` | SAST/test reports as validate finishes |
 
 ## Governance

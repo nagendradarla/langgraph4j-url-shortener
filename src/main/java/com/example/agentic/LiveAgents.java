@@ -20,7 +20,7 @@ final class LiveAgents {
                 state.str("clarificationNotes", "")));
         String prompt = """
                 You are the requirements agent in a gated SDLC. Do not implement code.
-                Do not git commit or push. Do not modify src/.
+                Do not git commit or push. Do not modify src/. Do not run shell, mvn, or tests.
 
                 Requirement:
                 %s
@@ -53,7 +53,7 @@ final class LiveAgents {
         Path tasksFile = runDir.resolve("tasks.json");
         String prompt = """
                 You are the planner agent in a gated SDLC. Do not implement code.
-                Do not git commit or push.
+                Do not git commit or push. Do not run shell, mvn, or tests.
 
                 Spec JSON:
                 %s
@@ -104,7 +104,8 @@ final class LiveAgents {
                 Tasks:
                 %s
                 %s
-                Implement or fix the workspace so SAST HIGH/CRITICAL is clean and unit tests can pass.
+                Write or edit Java (and optional src/test/java tests) so SAST HIGH/CRITICAL can pass.
+                Do not run shell, mvn, or tests — the graph overlays this workspace and runs SAST + JUnit.
                 Do not modify files outside com/example/shortener except optional src/test/java tests.
                 """.formatted(state.requirement(), JsonSupport.stringify(state.spec()),
                 JsonSupport.stringify(state.tasks()), reports);

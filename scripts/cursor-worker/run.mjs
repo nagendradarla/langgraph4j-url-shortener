@@ -44,7 +44,11 @@ try {
   agent = await Agent.create({
     apiKey,
     model: { id: modelId },
-    local: { cwd },
+    // Shell always spawns /bin/zsh inside Cursor's command sandbox; that
+    // path is missing there (ENOENT) and crashes this process. The Java
+    // graph owns mvn/SAST. Agents write files with edit/read tools.
+    disallowedTools: ["shell", "task"],
+    local: { cwd, sandboxOptions: { enabled: false } },
   });
   const agentId = agent.agentId || agent.agent_id || "";
   const run = await agent.send(prompt);

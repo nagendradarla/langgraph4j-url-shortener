@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # sdlc.sh — run a feature or bugfix through the gated LangGraph4j SDLC
-# (understand → decompose → implement → SAST/tests → HITL).
-# Cursor agents write code; this script never git-commits.
+# (understand → decompose → implement → SAST/tests → HITL → PR).
+# Cursor agents write code. After HITL approve, --pr commits product files
+# and opens a review PR. The graph never merges.
 #
 #   ./scripts/sdlc.sh -r "Add GET /metrics for links and capacity"
 #   ./scripts/sdlc.sh -f requirements/feature-bulk-shorten.txt
-#   ./scripts/sdlc.sh requirements/feature-optional-ttl.txt
+#   ./scripts/sdlc.sh --no-pr -f requirements/feature-bulk-shorten.txt
 #   ./scripts/sdlc.sh --auto-approve -f requirements/feature-bulk-shorten.txt
 #   ./scripts/sdlc.sh --apply -r "Fix unknown stats returning 0 instead of 404"
 
@@ -25,6 +26,8 @@ Options:
   --interactive     Pause for clarify/HITL (default)
   --auto-approve    Auto-answer clarify=memory and HITL=approve
   --apply           After HITL approve, copy workspace Java into src/main/java
+  --pr              After HITL approve, apply, commit product files, open a PR (default)
+  --no-pr           Skip commit/PR (still HITL; use --apply to copy files only)
   --clarify <text>  Used with --auto-approve when the graph asks to clarify
 
 Put CURSOR_API_KEY in .env (see .env.example).
@@ -35,6 +38,7 @@ REQUIREMENT=""
 REQUIREMENT_FILE=""
 HITL_MODE="--interactive"
 APPLY=""
+PR="--pr"
 CLARIFY="memory"
 
 if [[ -f "$ROOT/.env" ]]; then
@@ -76,6 +80,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --apply)
       APPLY="--apply"
+      shift
+      ;;
+    --pr)
+      PR="--pr"
+      shift
+      ;;
+    --no-pr)
+      PR=""
       shift
       ;;
     --clarify)
@@ -146,11 +158,11 @@ fi
 echo "-----"
 cat "$REQUIREMENT_FILE"
 echo "-----"
-echo "mode: $HITL_MODE ${APPLY}"
+echo "mode: $HITL_MODE ${APPLY} ${PR}"
 echo
 
 # exec:java skips compile; pass the file as a system property so Maven cannot drop it.
-EXEC_ARGS="run live --requirement-file ${REQUIREMENT_FILE} ${HITL_MODE} --clarify ${CLARIFY} ${APPLY}"
+EXEC_ARGS="run live --requirement-file ${REQUIREMENT_FILE} ${HITL_MODE} --clarify ${CLARIFY} ${APPLY} ${PR}"
 mvn -q compile exec:java \
   "-Dagentic.requirementFile=${REQUIREMENT_FILE}" \
   "-Dexec.args=${EXEC_ARGS}"

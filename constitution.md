@@ -23,3 +23,4 @@ Audit JSONL records decision lineage.
 
 ## VI. Change control
 Release-ready output is under `runs/<thread>/`. Success requires HITL approval.
+After approve the graph may open a review PR for product files. It must not merge to main.
