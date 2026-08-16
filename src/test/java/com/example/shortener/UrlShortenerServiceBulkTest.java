@@ -32,6 +32,13 @@ class UrlShortenerServiceBulkTest {
     }
 
     @Test
+    void bulkShortenParsesCrlfLines() {
+        List<String> codes = service.bulkShorten("https://example.com/a\r\nhttps://example.com/b");
+        assertEquals(2, codes.size());
+        assertEquals("https://example.com/a", service.resolve(codes.get(0)).orElseThrow());
+    }
+
+    @Test
     void bulkShortenRejectsBlankLine() {
         assertThrows(IllegalArgumentException.class,
                 () -> service.bulkShorten("https://example.com/a\n\nhttps://example.com/b"));
@@ -45,6 +52,13 @@ class UrlShortenerServiceBulkTest {
         assertThrows(IllegalArgumentException.class,
                 () -> service.bulkShorten("https://example.com/new\njavascript:alert(1)"));
         assertEquals(1, service.health().get("links"));
+    }
+
+    @Test
+    void bulkShortenRejectsDataScheme() {
+        assertThrows(IllegalArgumentException.class,
+                () -> service.bulkShorten("https://example.com/a\ndata:text/html,hi"));
+        assertEquals(0, service.health().get("links"));
     }
 
     @Test

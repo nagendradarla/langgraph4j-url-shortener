@@ -55,6 +55,13 @@ class UrlShortenerServerBulkTest {
     }
 
     @Test
+    void bulkShortenEmptyBodyReturns200WithEmptyResponse() throws Exception {
+        HttpResponse<String> response = post("/shorten/bulk", "");
+        assertEquals(200, response.statusCode());
+        assertEquals("", response.body());
+    }
+
+    @Test
     void bulkShortenRejectsInvalidBatch() throws Exception {
         HttpResponse<String> response = post("/shorten/bulk",
                 "https://example.com/a\nfile:///etc/passwd");
@@ -97,6 +104,14 @@ class UrlShortenerServerBulkTest {
         String singleCode = post("/shorten", "https://example.com/same").body();
         String bulkCode = post("/shorten/bulk", "https://example.com/same").body();
         assertEquals(singleCode, bulkCode);
+    }
+
+    @Test
+    void bulkCodesReportStats() throws Exception {
+        String code = post("/shorten/bulk", "https://example.com/stats-bulk").body();
+        assertEquals("0", get("/stats/" + code).body());
+        assertEquals(302, get("/" + code).statusCode());
+        assertEquals("1", get("/stats/" + code).body());
     }
 
     private HttpResponse<String> post(String path, String body) throws Exception {
