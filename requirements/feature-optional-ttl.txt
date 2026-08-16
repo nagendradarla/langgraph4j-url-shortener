@@ -1,0 +1,7 @@
+Existing shortener already shortens, redirects, and tracks clicks.
+
+Add optional expiry: POST /shorten body may be two lines, the URL then ttl=SECONDS.
+After expiry, resolve and stats return 404. Codes with no ttl never expire.
+
+Do not change idempotent shorten, the scheme allow-list, or click increment on successful resolve.
+In-memory only.

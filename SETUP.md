@@ -6,6 +6,7 @@ This is a **Java 17** URL shortener driven by **LangGraph4j**. The graph is the 
 
 - JDK 17+ (`java -version`)
 - Maven 3.9+ (`mvn -version`)
+- Node 22.13+ and `CURSOR_API_KEY` for **live** Cursor-agent runs only
 
 ```bash
 cd ~/github/langgraph4j-url-shortener
@@ -50,6 +51,25 @@ mvn -q exec:java -Dexec.args="run brownfield --auto-approve"
 mvn -q exec:java -Dexec.args="run ambiguous --auto-approve --clarify memory"
 ```
 
+### Live requirement (Cursor local agents)
+
+Canned scenarios above do **not** call an LLM. For a real feature or bugfix, use `scripts/sdlc.sh`: the graph still owns HITL/SAST; Cursor local agents fill understand, decompose, implement, and retry.
+
+```bash
+cp .env.example .env
+# paste CURSOR_API_KEY=cursor_... into .env  (https://cursor.com/dashboard/integrations)
+
+# Text or a requirements/*.txt file:
+./scripts/sdlc.sh -r "Add GET /metrics returning links and capacity. In-memory only."
+./scripts/sdlc.sh -f requirements/feature-bulk-shorten.txt
+./scripts/sdlc.sh requirements/feature-optional-ttl.txt
+
+# After HITL approve, copy workspace Java into src/main/java (agent never git commits):
+./scripts/sdlc.sh --apply -f requirements/feature-bulk-shorten.txt
+```
+
+`--apply` copies `runs/<thread>/workspace/com/example/shortener/*.java` into `src/main/java` only when you approve. Omit it to review the workspace first. Default is `--interactive`; pass `--auto-approve` only for unattended demos.
+
 Manual HITL (no `--auto-approve`):
 
 ```bash
@@ -76,13 +96,20 @@ Do **not** edit `001` behavior in place as an untracked change. Treat every incr
 
 ### Step A — Write the requirement
 
-In one sentence, plus what is out of scope. Example:
+In one sentence, plus what is out of scope. Put it in a text file under `requirements/` (or pass `-r` inline). Example:
 
 > Add custom aliases for short codes. Aliases must still reject dangerous schemes. Persistence remains out of scope.
 
-If anything is unclear (store? auth? TTL?), that is an **ambiguous** scenario — the graph must interrupt for clarify.
+If anything is unclear (store? auth? TTL?), the graph must interrupt for clarify.
 
-### Step B — Encode it as a scenario (or run ad hoc)
+For a live Cursor-agent run (feature or bugfix):
+
+```bash
+./scripts/sdlc.sh -f requirements/feature-bulk-shorten.txt
+./scripts/sdlc.sh -r "Fix unknown stats returning 0 instead of 404"
+```
+
+### Step B — Encode it as a canned scenario (offline, no API key)
 
 1. Add FRs and tasks in `src/main/java/com/example/agentic/Catalog.java`  
    - Every task maps to an FR  
@@ -132,6 +159,7 @@ See `constitution.md`:
 | `GraphStateException` on compile | Graph wiring error — check `SdlcGraph` |
 | SAST flags `new Random()` | Expected on greenfield iteration 0; retry should apply `SecureRandom` |
 | HITL never pauses | You passed `--auto-approve`; run without it |
+| `CURSOR_API_KEY is required` | Put the key in `.env` (see `.env.example`); canned scenarios need no key |
 | Ambiguous never asks | Clarification already in state; start a new thread |
 | Tests look at `src/main/java` | Run Maven from the repo root |
 
@@ -139,8 +167,8 @@ See `constitution.md`:
 
 | Assignment | This repo |
 |------------|-----------|
-| Requirement understanding | `understand` + spec FRs |
-| Task decomposition | `Catalog.tasks` DAG |
+| Requirement understanding | `understand` + spec FRs (`Catalog` offline, Cursor agent for `run live`) |
+| Task decomposition | `Catalog.tasks` DAG, or `tasks.json` from Cursor planner on live |
 | Brownfield reasoning | `impact` node |
 | Orchestration | LangGraph4j `StateGraph`, parallel design branch, cycles, checkpoints |
 | HITL | `interruptBefore("clarify","hitl")` + resume |

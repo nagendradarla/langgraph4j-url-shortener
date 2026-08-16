@@ -40,18 +40,30 @@ final class SdlcNodes {
         out.put("status", "running");
         out.put("phase", "requirements");
         out.put("injectSastFailure", inject);
+        out.put("applyOnApprove", state.flag("applyOnApprove"));
         out.put("metrics", metrics);
         out.put("decisions", List.of(Map.of("node", "ingest", "at", Instant.now().toString())));
         return out;
     }
 
-    static Map<String, Object> understand(OrchestratorState state) throws IOException {
+    static Map<String, Object> understand(OrchestratorState state) throws IOException, InterruptedException {
         String scenario = state.scenario();
         Map<String, Object> clarification = state.clarification();
         List<String> ambiguities = List.of();
         Map<String, Object> spec;
         String phase;
-        if ("ambiguous".equals(scenario) && clarification.isEmpty()) {
+        if (state.live()) {
+            Map<String, Object> loaded = LiveAgents.understand(state);
+            @SuppressWarnings("unchecked")
+            List<String> liveAmb = loaded.get("ambiguities") instanceof List<?> list
+                    ? list.stream().map(String::valueOf).toList()
+                    : List.of();
+            ambiguities = liveAmb;
+            Map<String, Object> liveSpec = new LinkedHashMap<>(loaded);
+            liveSpec.remove("ambiguities");
+            spec = liveSpec;
+            phase = ambiguities.isEmpty() ? "specified" : "ambiguous";
+        } else if ("ambiguous".equals(scenario) && clarification.isEmpty()) {
             spec = Map.of("title", "Draft — blocked on persistence ambiguity", "frs", Map.of());
             ambiguities = List.of("Where should click/analytics data be stored: memory, sqlite, or postgres?");
             phase = "ambiguous";
@@ -77,8 +89,11 @@ final class SdlcNodes {
 
     static Map<String, Object> clarify(OrchestratorState state) throws IOException {
         String storage = state.str("clarificationStorage", "memory");
-        Map<String, Object> clarification = Map.of("storage", storage);
-        audit(Path.of(state.runDir()), "clarify", storage);
+        String notes = state.str("clarificationNotes", storage);
+        Map<String, Object> clarification = new LinkedHashMap<>();
+        clarification.put("storage", storage);
+        clarification.put("notes", notes);
+        audit(Path.of(state.runDir()), "clarify", notes);
         Map<String, Object> metrics = state.metrics();
         metrics.put("interrupts", ((Number) metrics.getOrDefault("interrupts", 0)).intValue() + 1);
         return Map.of(
@@ -87,11 +102,13 @@ final class SdlcNodes {
                 "upstreamChanged", true,
                 "phase", "clarified",
                 "metrics", metrics,
-                "decisions", List.of(Map.of("node", "clarify", "storage", storage)));
+                "decisions", List.of(Map.of("node", "clarify", "notes", notes)));
     }
 
-    static Map<String, Object> decompose(OrchestratorState state) throws IOException {
-        List<Map<String, Object>> tasks = Catalog.tasks(state.scenario());
+    static Map<String, Object> decompose(OrchestratorState state) throws IOException, InterruptedException {
+        List<Map<String, Object>> tasks = state.live()
+                ? LiveAgents.decompose(state)
+                : Catalog.tasks(state.scenario());
         audit(Path.of(state.runDir()), "decompose", String.valueOf(tasks.size()));
         return Map.of(
                 "tasks", tasks,
@@ -130,11 +147,16 @@ final class SdlcNodes {
     }
 
     static Map<String, Object> impact(OrchestratorState state) throws IOException {
-        Map<String, Object> impact = "greenfield".equals(state.scenario())
-                ? Map.of("mode", "greenfield", "modules", List.of("UrlValidator", "UrlShortenerService", "UrlShortenerServer"))
-                : Map.of("mode", "brownfield",
-                "modules", List.of("UrlShortenerService.resolve", "clickCount", "GET /stats"),
-                "doNotTouch", List.of("shorten idempotency", "validator allow-list"));
+        Map<String, Object> impact;
+        if ("greenfield".equals(state.scenario())) {
+            impact = Map.of("mode", "greenfield", "modules",
+                    List.of("UrlValidator", "UrlShortenerService", "UrlShortenerServer"));
+        } else {
+            impact = Map.of("mode", state.live() ? "live" : "brownfield",
+                    "modules", List.of("UrlShortenerService", "UrlShortenerServer"),
+                    "requirement", state.requirement(),
+                    "doNotTouch", List.of("shorten idempotency", "validator allow-list"));
+        }
         audit(Path.of(state.runDir()), "impact", String.valueOf(impact.get("mode")));
         return Map.of("impact", impact, "decisions", List.of(Map.of("node", "impact")));
     }
@@ -171,22 +193,42 @@ final class SdlcNodes {
     static Map<String, Object> seed(OrchestratorState state) throws IOException {
         Path workspace = Path.of(state.workspace());
         Files.createDirectories(workspace.resolve("com/example/shortener"));
-        if (!"greenfield".equals(state.scenario())) {
-            WorkspaceIo.write(workspace.resolve("com/example/shortener/UrlShortenerService.java"),
-                    Catalog.resource("core-UrlShortenerService.java.txt"));
-            copyProductFile(workspace, "UrlValidator.java");
-            copyProductFile(workspace, "Base62Codec.java");
+        if (state.live() && state.iteration() > 0) {
+            audit(Path.of(state.runDir()), "seed", "keep-workspace");
+            return Map.of("phase", "seeded", "decisions", List.of(Map.of("node", "seed", "kept", true)));
+        }
+        if (state.live() || !"greenfield".equals(state.scenario())) {
+            if (state.live()) {
+                copyProductFile(workspace, "UrlValidator.java");
+                copyProductFile(workspace, "Base62Codec.java");
+                copyProductFile(workspace, "UrlShortenerService.java");
+                copyProductFile(workspace, "UrlShortenerServer.java");
+            } else {
+                WorkspaceIo.write(workspace.resolve("com/example/shortener/UrlShortenerService.java"),
+                        Catalog.resource("core-UrlShortenerService.java.txt"));
+                copyProductFile(workspace, "UrlValidator.java");
+                copyProductFile(workspace, "Base62Codec.java");
+            }
         }
         WorkspaceIo.snapshot(workspace, Path.of(state.runDir(), "snapshot"));
         audit(Path.of(state.runDir()), "seed", state.scenario());
         return Map.of("phase", "seeded", "decisions", List.of(Map.of("node", "seed")));
     }
 
-    static Map<String, Object> implementAll(OrchestratorState state) throws IOException {
+    static Map<String, Object> implementAll(OrchestratorState state) throws IOException, InterruptedException {
         Path workspace = Path.of(state.workspace());
         List<Map<String, Object>> tasks = new ArrayList<>();
         for (Map<String, Object> t : state.tasks()) {
             tasks.add(new LinkedHashMap<>(t));
+        }
+        if (state.live()) {
+            LiveAgents.implement(state, state.iteration() > 0);
+            for (Map<String, Object> task : tasks) {
+                task.put("status", "done");
+            }
+            audit(Path.of(state.runDir()), "implement", "cursor tasks=" + tasks.size());
+            return Map.of("tasks", tasks, "phase", "implemented",
+                    "decisions", List.of(Map.of("node", "implement_all", "mode", "cursor", "done", tasks.size())));
         }
         Set<String> done = new HashSet<>();
         boolean poison = state.flag("injectSastFailure") && state.iteration() == 0;
@@ -253,12 +295,46 @@ final class SdlcNodes {
         }
     }
 
-    static Map<String, Object> validate(OrchestratorState state) throws IOException {
+    static Map<String, Object> validate(OrchestratorState state) throws IOException, InterruptedException {
         Path workspace = Path.of(state.workspace());
         var findings = SastScanner.scan(workspace);
         boolean sastClean = !SastScanner.isBlocking(findings);
         List<Map<String, Object>> checks = new ArrayList<>();
         boolean testsPassed = true;
+        if (state.live()) {
+            Map<String, Object> mvn = WorkspaceValidator.mavenTest(Path.of("."), workspace);
+            testsPassed = Boolean.TRUE.equals(mvn.get("passed"));
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> mvnChecks = mvn.get("checks") instanceof List<?> list
+                    ? (List<Map<String, Object>>) list
+                    : List.of();
+            checks.addAll(mvnChecks);
+            String src = Files.exists(workspace.resolve("com/example/shortener/UrlShortenerService.java"))
+                    ? Files.readString(workspace.resolve("com/example/shortener/UrlShortenerService.java"))
+                    : "";
+            checks.add(Map.of("fr", "FR-6", "ok",
+                    src.contains("SecureRandom") && !src.contains("java.util.Random")));
+            testsPassed = testsPassed && checks.stream().allMatch(c -> Boolean.TRUE.equals(c.get("ok")));
+            Map<String, Object> testReport = new LinkedHashMap<>();
+            testReport.put("passed", testsPassed);
+            testReport.put("checks", checks);
+            testReport.put("count", checks.size());
+            testReport.put("mvnOutput", mvn.getOrDefault("output", ""));
+            Map<String, Object> sastReport = Map.of(
+                    "clean", sastClean,
+                    "blocking", findings.size(),
+                    "findings", findings.stream().map(f -> f.cwe() + " " + f.path()).toList());
+            WorkspaceIo.write(Path.of(state.runDir(), "artifacts", "test-report.json"),
+                    JsonSupport.stringify(testReport));
+            WorkspaceIo.write(Path.of(state.runDir(), "artifacts", "sast-report.json"),
+                    JsonSupport.stringify(sastReport));
+            audit(Path.of(state.runDir()), "validate", "tests=" + testsPassed + " sast=" + sastClean);
+            return Map.of(
+                    "testReport", testReport,
+                    "sastReport", sastReport,
+                    "phase", "validated",
+                    "decisions", List.of(Map.of("node", "validate", "passed", testsPassed && sastClean)));
+        }
         try {
             UrlShortenerService svc = new UrlShortenerService();
             String code = svc.shorten("https://example.com/a");
@@ -395,6 +471,9 @@ final class SdlcNodes {
                 metrics.get("fallbacks"), metrics.get("e2eMs"));
         WorkspaceIo.write(Path.of(state.runDir(), "ENGINEERING_SUMMARY.md"), md);
         WorkspaceIo.write(Path.of(state.runDir(), "metrics.json"), metrics.toString());
+        if (state.flag("applyOnApprove") && "approve".equals(state.hitl().get("action"))) {
+            applyWorkspaceToProduct(state);
+        }
         audit(Path.of(state.runDir()), "summarize", "complete");
         return Map.of("summary", Map.of("metrics", metrics, "hitl", state.hitl()),
                 "metrics", metrics, "status", "completed", "phase", "done",
@@ -444,6 +523,28 @@ final class SdlcNodes {
             case "request_changes" -> "replan";
             default -> "safe_stop";
         };
+    }
+
+    private static void applyWorkspaceToProduct(OrchestratorState state) throws IOException {
+        Path overlay = Path.of(state.workspace(), "com/example/shortener");
+        Path dest = Path.of("src/main/java/com/example/shortener");
+        if (!Files.isDirectory(overlay)) {
+            GraphLog.line("apply skipped — no workspace Java");
+            return;
+        }
+        Files.createDirectories(dest);
+        try (var files = Files.list(overlay)) {
+            files.filter(p -> p.toString().endsWith(".java")).forEach(p -> {
+                try {
+                    Files.copy(p, dest.resolve(p.getFileName()),
+                            java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    GraphLog.line("apply " + p.getFileName() + " → src/main/java/com/example/shortener/");
+                } catch (IOException e) {
+                    throw new IllegalStateException(e);
+                }
+            });
+        }
+        audit(Path.of(state.runDir()), "apply", dest.toString());
     }
 
     private static void copyProductFile(Path workspace, String name) throws IOException {

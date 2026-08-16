@@ -10,12 +10,12 @@ import java.util.Scanner;
 
 /**
  * CLI:
+ *   run live --requirement ... | --requirement-file <path> [--auto-approve|--interactive] [--apply]
  *   run greenfield|brownfield|ambiguous [--auto-approve|--interactive] [--clarify memory]
  *   resume THREAD --approve|--reject|--request-changes|--clarify memory
  *   serve [port]
  *
  * HITL resume uses an in-memory checkpointer: --interactive keeps the same JVM.
- * A second {@code mvn exec:java resume ...} process cannot see the first run's checkpoints.
  */
 public final class AgenticMain {
 
@@ -26,6 +26,7 @@ public final class AgenticMain {
             System.out.println("""
                     Usage:
                       java ... AgenticMain serve [port]
+                      java ... AgenticMain run live --requirement <text> | --requirement-file <path> [--auto-approve|--interactive] [--apply]
                       java ... AgenticMain run <greenfield|brownfield|ambiguous> [--auto-approve|--interactive] [--clarify memory]
                       java ... AgenticMain resume <threadId> --approve|--reject|--request-changes|--clarify memory
                     """);
@@ -43,22 +44,33 @@ public final class AgenticMain {
             String scenario = args[1];
             boolean auto = has(args, "--auto-approve");
             boolean interactive = has(args, "--interactive");
+            boolean apply = has(args, "--apply");
             String storage = flagValue(args, "--clarify", "memory");
+            String requirement = "live".equals(scenario)
+                    ? liveRequirement(args)
+                    : Catalog.requirement(scenario);
+            if ("live".equals(scenario) && requirement.isBlank()) {
+                System.err.println("run live requires --requirement <text> or --requirement-file <path>");
+                return;
+            }
+            boolean injectSast = "greenfield".equals(scenario);
+            Runner.RunRequest request = new Runner.RunRequest(scenario, requirement, injectSast, apply);
             if (auto || interactive) {
                 GraphLog.line("start scenario=" + scenario
-                        + " mode=" + (interactive ? "interactive-HITL" : "auto-approve"));
-                var result = runner.runUntilComplete(scenario, true, current -> {
+                        + " mode=" + (interactive ? "interactive-HITL" : "auto-approve")
+                        + (apply ? " apply" : ""));
+                var result = runner.runUntilComplete(request, current -> {
                     if (interactive) {
                         return promptHuman(current);
                     }
                     if (current.nextNode().contains("clarify")) {
-                        return Map.of("clarificationStorage", storage);
+                        return Map.of("clarificationStorage", storage, "clarificationNotes", storage);
                     }
                     return Map.of("hitlAction", "approve");
                 });
                 print(result);
             } else {
-                print(runner.start(scenario, true));
+                print(runner.start(request));
             }
             return;
         }
@@ -72,7 +84,8 @@ public final class AgenticMain {
             } else if (has(args, "--request-changes")) {
                 updates = Map.of("hitlAction", "request_changes");
             } else {
-                updates = Map.of("clarificationStorage", flagValue(args, "--clarify", "memory"));
+                String storage = flagValue(args, "--clarify", "memory");
+                updates = Map.of("clarificationStorage", storage, "clarificationNotes", storage);
             }
             print(runner.resume(thread, updates));
         }
@@ -88,14 +101,21 @@ public final class AgenticMain {
             System.out.println("runDir=" + current.state().runDir());
         }
         if (current.nextNode().contains("clarify")) {
-            System.out.println("Ambiguity: where should analytics be stored?");
-            System.out.print("Enter storage [memory|sqlite|postgres] (default memory): ");
-            String line = stdin().trim().toLowerCase(Locale.ROOT);
+            if (current.state() != null && !current.state().ambiguities().isEmpty()) {
+                System.out.println("Ambiguities:");
+                for (String q : current.state().ambiguities()) {
+                    System.out.println("  - " + q);
+                }
+            } else {
+                System.out.println("Ambiguity: where should analytics be stored?");
+            }
+            System.out.print("Enter clarification (default memory): ");
+            String line = stdin().trim();
             if (line.isEmpty()) {
                 line = "memory";
             }
-            GraphLog.line("human clarification storage=" + line);
-            return Map.of("clarificationStorage", line);
+            GraphLog.line("human clarification=" + line);
+            return Map.of("clarificationStorage", line, "clarificationNotes", line);
         }
         if (current.state() != null) {
             Path gate = Path.of(current.state().runDir(), "HITL_GATE.md");
@@ -157,5 +177,39 @@ public final class AgenticMain {
             }
         }
         return fallback;
+    }
+
+    static String liveRequirement(String[] args) throws Exception {
+        String file = flagValue(args, "--requirement-file", "");
+        if (file.isBlank()) {
+            file = System.getProperty("agentic.requirementFile", "");
+        }
+        if (!file.isBlank()) {
+            Path path = Path.of(file);
+            if (!Files.isRegularFile(path)) {
+                throw new IllegalArgumentException("requirement file not found: " + path.toAbsolutePath());
+            }
+            return Files.readString(path).trim();
+        }
+        return requirementValue(args);
+    }
+
+    private static String requirementValue(String[] args) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < args.length; i++) {
+            if ("--requirement".equals(args[i])) {
+                for (int j = i + 1; j < args.length; j++) {
+                    if (args[j].startsWith("--")) {
+                        break;
+                    }
+                    if (sb.length() > 0) {
+                        sb.append(' ');
+                    }
+                    sb.append(args[j]);
+                }
+                break;
+            }
+        }
+        return sb.toString();
     }
 }

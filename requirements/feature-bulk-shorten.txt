@@ -1,0 +1,6 @@
+Build POST /shorten/bulk.
+
+Request body is one http(s) URL per line. Response is one short code per line in the same order.
+If any line is a dangerous scheme (javascript, file, data) or invalid, reject the whole batch with 400 and create no codes.
+
+Do not change POST /shorten, GET /{code}, or GET /stats/{code}. In-memory only.
